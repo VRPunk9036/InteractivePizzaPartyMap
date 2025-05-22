@@ -1,0 +1,298 @@
+<html>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+     integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+     crossorigin=""/>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: Arial, sans-serif;
+        }
+        #map { height: 100vh; }
+        #controls {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            background-color: white;
+            padding: 10px;
+            border-radius: 5px;
+            z-index: 1000;
+        }
+        #cityList {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background-color: white;
+            padding: 10px;
+            padding-left: 20px;
+            border-radius: 5px;
+            max-height: 200px;
+            overflow-y: auto;
+            z-index: 1000;
+        }
+        #liveMinutes {
+            display: none;
+        }
+    </style>
+      <!-- Make sure you put this AFTER Leaflet's CSS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+        crossorigin=""></script>
+    <script src="./date.js"></script>
+    <script src="./cities.js"></script>
+    <script src="./kml.js"></script>
+    <body >
+        <div id="controls">
+            <div id="timeSlider">
+                <input type="range" id="timeRange" min="0" max="23" value="12" step="1">
+                <span id="timeValue">12:00</span>
+            </div>
+            
+            <div>
+                <label for="liveUpdate">Live Update</label>
+                <input type="checkbox" id="liveUpdate" checked>
+            </div>
+            <!-- Local Timezone slider -->
+            <div id="localTimeZone">
+                <input type="range" id="localTimeZoneRange" min="-12" max="14" value="1" step="1">
+                <span id="localTimeZoneValue">UTC+1</span>
+            </div>
+            <div id="localTimeZoneValue"></div>
+            <!-- Live minutes display -->
+            <div id="liveMinutes">
+                <span id="liveMinutesValue">0</span> minutes
+            </div>
+        </div>
+        <!-- City list -->
+        <ul id="cityList">
+            <li>🍕</li>
+        </ul>
+        <div id="map"></div>
+        
+    </body>
+    <script>
+        var map = L.map('map').setView([21.046925983782362, -5.366957518673094], 3);
+        L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: '&copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+        }).addTo(map);
+
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(kmlFile, "application/xml");
+        const kmlDocument = doc.children[0].children[0];
+        const placemarks = kmlDocument.getElementsByTagName('Placemark');
+
+        const gpsLocation = [];
+        for (let i = 0; i < placemarks.length; i++) {
+            const name = placemarks[i].getElementsByTagName('name')[0].textContent;
+            const coordinates = placemarks[i].getElementsByTagName('coordinates')[0].textContent.split(',');
+            const extendedData = placemarks[i].getElementsByTagName('ExtendedData')[0];
+            //const coordinates = placemarks[i].getElementsByTagName('coordinates')[0].textContent.split(',');
+
+            const country = Object.values(extendedData.getElementsByTagName('Data')).find(data => {
+                return data.getAttribute('name') === 'Country';
+            }).getElementsByTagName('value')[0].textContent;
+            
+            const lon = parseFloat(coordinates[0]);
+            const lat = parseFloat(coordinates[1]);
+            gpsLocation.push({
+                city: name,
+                country: country,
+                lon_lat: [lon, lat]
+            });
+        }
+
+
+        // Voorbeeldgebruik:
+        const localDate = makeDateFromTimeZone('2024-10-15T12:00:00', 'Europe/Amsterdam');
+        console.log('Lokale datum (op pc):', localDate.toLocaleString());
+        validTimes = 0;
+        function dateTimeAndTimezoneToDate(date, hour_mins, timeZone) {
+            const dateTime = date + 'T' + hour_mins + ':00';
+            const localDate = makeDateFromTimeZone(dateTime, timeZone);
+            console.log(localDate.toLocaleString());
+            return localDate;
+        }
+
+        cities = cities.filter(city => { 
+            // Remove memphis for now too long
+            if (city.city === "Memphis") {
+                return false;
+            }
+            return true;
+
+        })
+
+        for (let city of cities) {
+            console.log(city);
+            city.lon_lat = getCityCoordinates(city.city, city.country);
+            let marker = L.marker([city.lon_lat[1], city.lon_lat[0]]);
+            // set icon
+
+            // MoltoBene.png
+            const icon = L.icon({
+                iconUrl: 'MoltoBene.png',
+                iconSize: [32, 32], // size of the icon
+                iconAnchor: [16, 32], // point of the icon which will correspond to marker's location
+                popupAnchor: [0, -32] // point from which the popup should open relative to the iconAnchor
+            });
+            marker.setIcon(icon);
+            
+            city.marker = marker.addTo(map);
+            city.marker.bindPopup(city.city + ", " + city.country);
+            
+            // hide marker
+            city.marker.getElement().style.display = 'none';
+            // show marker
+            city.marker.getElement().style.display = 'block';
+
+            if (city.city === "Charleston") {
+                // 6 to 10 pm  Charleston time (UTC-4)
+                const startTime = new Date('2025-05-15T18:00:00-04:00');
+                const endTime = new Date('2025-05-15T22:00:00-04:00');
+                city.start_time = startTime;
+                city.end_time = endTime;
+                continue;
+            }
+
+
+            if (city.apiData !== undefined && city.apiData.ticket !== undefined) {
+                console.log(city.apiData.ticket);
+                city.start_time = dateTimeAndTimezoneToDate(city.apiData.ticket.event_start_date, city.apiData.ticket.event_start_time, city.apiData.ticket.event_timezone);
+                let event_end_time = city.apiData.ticket.event_end_time;
+                if (event_end_time === "") {
+                    event_end_time = city.apiData.ticket.event_start_time.replace(":00", ":59");
+                }
+                city.end_time = dateTimeAndTimezoneToDate(city.apiData.ticket.event_end_date, event_end_time, city.apiData.ticket.event_timezone);
+                validTimes++;
+
+            }
+        }
+
+        function getCurrentEventCities(cities, currentDateTime) {
+            const currentDate = new Date(currentDateTime);
+            return cities.filter(city => {
+                const startTime = city.start_time;
+                const endTime = city.end_time;
+                //console.log('Starttijd:', startTime.toLocaleString());
+                //console.log('Eindtijd:', endTime.toLocaleString());
+                // verschil
+                //console.log('Verschil:', (currentDate - startTime) / 1000 / 60);
+                return currentDate >= startTime && currentDate <= endTime;
+            });
+        }
+
+        function updateCitiesDiv(cities) {
+            const cityList = document.getElementById('cityList');
+            cityList.innerHTML = '';
+            cities.forEach(city => {
+                const li = document.createElement('li');
+                li.textContent = city.city + ", " + city.country;
+                cityList.appendChild(li);
+            });
+        }
+
+        function updateCityMarkers(shownCities) {
+            cities.forEach(city => {
+                if (shownCities.includes(city)) {
+                    city.marker.getElement().style.display = 'block';
+                } else {
+                    city.marker.getElement().style.display = 'none';
+                }
+            });
+        }
+
+        // slider event listener
+        const timeRange = document.getElementById('timeRange');
+        const timeValue = document.getElementById('timeValue');
+        timeRange.addEventListener('change', function() {
+            const selectedUnixMinute = this.value;
+            const selectedTime = unixMinutesToDate(selectedUnixMinute);
+            //timeValue.textContent = selectedTime;
+
+            // set date and time on timevalue for the selected local timezone
+            const localTimeZone = document.getElementById('localTimeZoneRange').value;
+            const localTimeZoneOffset = parseInt(localTimeZone) * 60;
+            const localDateTime = new Date(selectedUnixMinute * 60 * 1000 + localTimeZoneOffset * 60 * 1000);
+            const localDate = localDateTime.toISOString().split('T')[0];
+            const localTime = localDateTime.toISOString().split('T')[1].slice(0, 5);
+            timeValue.textContent = localDate + ' ' + localTime;
+
+            const currentCities = getCurrentEventCities(cities, selectedTime.toISOString());
+            updateCitiesDiv(currentCities);
+            updateCityMarkers(currentCities);
+        });
+
+        // local timezone slider event listener
+        const localTimeZoneRange = document.getElementById('localTimeZoneRange');
+        const localTimeZoneValue = document.getElementById('localTimeZoneValue');
+        localTimeZoneRange.addEventListener('change', function() {
+            const selectedTimeZone = this.value;
+            localTimeZoneValue.textContent = 'UTC' + (selectedTimeZone >= 0 ? '+' : '') + selectedTimeZone;
+            console.log('Selected timezone:', selectedTimeZone);
+            const currentDateTime = new Date().toISOString().split('T')[0] + 'T' + timeRange.value + ':00';
+            const currentCities = getCurrentEventCities(cities, currentDateTime);
+            updateCitiesDiv(currentCities);
+            updateCityMarkers(currentCities);
+        });
+
+        const liveUpdateCheckbox = document.getElementById('liveUpdate');
+
+        // Unix timeminutes
+        const liveMinutesValue = document.getElementById('liveMinutesValue');
+        setInterval(() => {
+            const currentDateTime = new Date().toISOString();
+            const currentDate = new Date(currentDateTime);
+            liveMinutesValue.textContent = dateToUnixMinutes(currentDate);
+            if (liveUpdateCheckbox.checked) {
+                timeRange.value = dateToUnixMinutes(currentDate);
+                // trigger the change event
+                const event = new Event('change');
+                timeRange.dispatchEvent(event);
+            }
+        }, 1000);
+
+        function unixMinutesToDate(unixMinutes) {
+            const date = new Date(unixMinutes * 60 * 1000);
+            return date;
+        }
+
+        function dateToUnixMinutes(date) {
+            const unixTime = Math.floor(new Date(date).getTime() / 1000);
+            return Math.floor(unixTime / 60);
+        }
+
+        // lowest unix minute for 2025-05-22
+        const lowestUnixMinute = dateToUnixMinutes(new Date('2025-05-22T00:00:00Z'));
+        console.log('Lowest unix minute:', lowestUnixMinute);
+
+        // highest unix minute for 2025-05-22
+        const highestUnixMinute = dateToUnixMinutes(new Date('2025-05-22T23:59:59Z'));
+        console.log('Highest unix minute:', highestUnixMinute);
+
+        // last end time unix minute
+        const latestEndTime = cities.reduce((latest, city) => {
+            if (city.end_time) {
+                const endTimeUnix = dateToUnixMinutes(city.end_time);
+                return Math.max(latest, endTimeUnix);
+            }
+            return latest;
+        }, 0);
+        console.log('Latest end time unix minute:', latestEndTime);
+        // update timerange min value
+        timeRange.min = lowestUnixMinute;
+        timeRange.max = latestEndTime;
+
+        function getCityCoordinates(city, country) {
+            const cityData = gpsLocation.find(item => item.city.trim() === city.trim() && item.country.trim() === country.trim());
+            if (cityData) {
+                return cityData.lon_lat;
+            } else {
+                console.error('City not found:', city, country);
+                return null;
+            }
+        }
+
+
+    </script>
+</html>
