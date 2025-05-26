@@ -421,6 +421,9 @@
                 return null;
             }
         }
+
+        // Autoplay :
+        playButton.click();
     </script>
     
     <script type="module">
@@ -511,9 +514,8 @@ console.warn('Using module script for globe.gl example');
 
             const el = document.createElement('div');
             
-            el.innerHTML = `<img src='${MOLTO_BENE_GIF}' style='width: 20px; height: auto; border-radius: 50%;' />`;
-            //el.style.color = d.color;
-            el.style.width = '10px'; //`${d.size}px`;
+            el.innerHTML = `<img src='${MOLTO_BENE_GIF}' style='width: 100%; height: auto; border-radius: 50%;' />`;
+            el.style.width = '25px'; //`${d.size}px`;
             el.style.transition = 'opacity 250ms';
             el.dataset.city = city.city;
             el.dataset.country = city.country;
