@@ -39,10 +39,13 @@
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
         integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
         crossorigin=""></script>
+    <!-- globe.gl -->
+     <!-- https://globe.gl/example/day-night-cycle/ -->
+    <script src="https://cdn.jsdelivr.net/npm/globe.gl"></script>
     <script src="./date.js"></script>
     <script src="./cities.js"></script>
     <script src="./kml.js"></script>
-    <body >
+    <body>
         <div id="controls">
             <div id="timeSlider">
                 <input type="range" id="timeRange" min="0" max="23" value="12" step="1">
@@ -71,15 +74,22 @@
             <div id="liveMinutes">
                 <span id="liveMinutesValue">0</span> minutes
             </div>
+            <!-- 3d toggle -->
+            <div>
+                <label for="3dToggle">3D View</label>
+                <input type="checkbox" id="3dToggle">
+            </div>
         </div>
         <!-- City list -->
         <ul id="cityList">
             <li>🍕</li>
         </ul>
         <div id="map"></div>
-        
+        <div id="globeViz"></div>
+        <!-- <div id="time"></div> -->
     </body>
     <script>
+        let world = null;
         let playing = false;
         const playButton = document.getElementById('playButton');
 
@@ -205,6 +215,8 @@
         for (let city of cities) {
             console.log(city);
             city.lon_lat = getCityCoordinates(city.city, city.country);
+            city.lng = city.lon_lat[0];
+            city.lat = city.lon_lat[1];
             let marker = L.marker([city.lon_lat[1], city.lon_lat[0]]);
 
             // MoltoBene.png
@@ -280,10 +292,19 @@
             cities.forEach(city => {
                 if (shownCities.includes(city)) {
                     city.marker.getElement().style.display = 'block';
+                    if (city.element3D !== undefined) {
+                        city.element3D.style.display = 'block'; // show the 3D element
+                    }
                 } else {
                     city.marker.getElement().style.display = 'none';
+                    if (city.element3D !== undefined) {
+                        city.element3D.style.display = 'none'; // hide the 3D element
+                    }
                 }
             });
+            if (world !== null) {
+                world.htmlElementsData(cities);
+            }
         }
 
         // slider event listener
@@ -334,7 +355,6 @@
             const selectedTimeZone = localTimeZoneRange.value;
             localTimeZoneValue.textContent = timeZoneNames[selectedTimeZone] || 'UTC' + (selectedTimeZone >= 0 ? '+' : '') + selectedTimeZone;
         }
-
 
         const liveUpdateCheckbox = document.getElementById('liveUpdate');
 
@@ -398,4 +418,203 @@
             }
         }
     </script>
+    
+    <script type="module">
+        
+// // Wait until the cities are loaded
+// while (typeof cities === 'undefined' || cities.length === 0) {
+//         console.log('Waiting for cities to be loaded...');
+//         await new Promise(resolve => setTimeout(resolve, 100));
+//     }
+
+
+    import { TextureLoader, ShaderMaterial, Vector2 } from 'https://esm.sh/three';
+    import * as solar from 'https://esm.sh/solar-calculator';
+console.warn('Using module script for globe.gl example');
+    const VELOCITY = 1; // minutes per frame
+
+    // Custom shader:  Blends night and day images to simulate day/night cycle
+    const dayNightShader = {
+      vertexShader: `
+        varying vec3 vNormal;
+        varying vec2 vUv;
+        void main() {
+          vNormal = normalize(normalMatrix * normal);
+          vUv = uv;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        #define PI 3.141592653589793
+        uniform sampler2D dayTexture;
+        uniform sampler2D nightTexture;
+        uniform vec2 sunPosition;
+        uniform vec2 globeRotation;
+        varying vec3 vNormal;
+        varying vec2 vUv;
+
+        float toRad(in float a) {
+          return a * PI / 180.0;
+        }
+
+        vec3 Polar2Cartesian(in vec2 c) { // [lng, lat]
+          float theta = toRad(90.0 - c.x);
+          float phi = toRad(90.0 - c.y);
+          return vec3( // x,y,z
+            sin(phi) * cos(theta),
+            cos(phi),
+            sin(phi) * sin(theta)
+          );
+        }
+
+        void main() {
+          float invLon = toRad(globeRotation.x);
+          float invLat = -toRad(globeRotation.y);
+          mat3 rotX = mat3(
+            1, 0, 0,
+            0, cos(invLat), -sin(invLat),
+            0, sin(invLat), cos(invLat)
+          );
+          mat3 rotY = mat3(
+            cos(invLon), 0, sin(invLon),
+            0, 1, 0,
+            -sin(invLon), 0, cos(invLon)
+          );
+          vec3 rotatedSunDirection = rotX * rotY * Polar2Cartesian(sunPosition);
+          float intensity = dot(normalize(vNormal), normalize(rotatedSunDirection));
+          vec4 dayColor = texture2D(dayTexture, vUv);
+          vec4 nightColor = texture2D(nightTexture, vUv);
+          float blendFactor = smoothstep(-0.1, 0.1, intensity);
+          gl_FragColor = mix(nightColor, dayColor, blendFactor);
+        }
+      `
+    };
+
+    const sunPosAt = dt => {
+      const day = new Date(+dt).setUTCHours(0, 0, 0, 0);
+      const t = solar.century(dt);
+      const longitude = (day - dt) / 864e5 * 360 - 180;
+      return [longitude - solar.equationOfTime(t) / 4, solar.declination(t)];
+    };
+
+    //let dt = +new Date();
+    //const timeEl = document.getElementById('time');
+
+    world = new Globe(document.getElementById('globeViz'));
+    const MOLTO_BENE_GIF = "https://cdn.prod.website-files.com/60651d01d383e4f482012c1d/649c84301e6cb6eaa5035fcf_molto%20benny%20walking%20(1).gif"
+    world.htmlElementsData(cities)
+        .htmlElement(city => {
+
+            const el = document.createElement('div');
+            
+            el.innerHTML = `<img src='${MOLTO_BENE_GIF}' style='width: 20px; height: auto; border-radius: 50%;' />`;
+            //el.style.color = d.color;
+            el.style.width = '10px'; //`${d.size}px`;
+            el.style.transition = 'opacity 250ms';
+
+            el.style['pointer-events'] = 'auto';
+            el.style.cursor = 'pointer';
+            el.onclick = () => {
+                console.info(city);
+                // show marker popup
+                
+                // create div for popup
+                const popupContent = document.createElement('div');
+                popupContent.innerHTML = `<strong>${city.city}, ${city.country}</strong><br>`;
+                if (city.apiData !== undefined && city.apiData.ticket !== undefined) {
+                    popupContent.innerHTML += `<strong>Start:</strong> ${city.apiData.ticket.event_start_date} ${city.apiData.ticket.event_start_time} (${city.apiData.ticket.event_timezone})<br>`;
+                    popupContent.innerHTML += `<strong>End:</strong> ${city.apiData.ticket.event_end_date} ${city.apiData.ticket.event_end_time} (${city.apiData.ticket.event_timezone})<br>`;
+                } else {
+                    popupContent.innerHTML += `<strong>No event data available</strong>`;
+                }
+                // create popup on 3d map
+                const popup = document.createElement('div');
+                popup.style.position = 'absolute';
+                popup.style.backgroundColor = 'white';
+                popup.style.padding = '10px';
+                popup.style.borderRadius = '5px';
+                popup.style.boxShadow = '0 2px 10px rgba(0,0,0,0.1)';
+                popup.style.zIndex = '1000';
+                popup.style.top = '50%';
+                popup.style.left = '50%';
+                popup.style.transform = 'translate(-50%, -50%)';
+                popup.appendChild(popupContent);
+                // add popup to body
+                document.body.appendChild(popup);
+                // remove popup on click
+                popup.onclick = () => {
+                    document.body.removeChild(popup);
+                };
+                // anywhere else also removes the popup
+                // document.addEventListener('click', (e) => {
+                //     if (!popup.contains(e.target)) {
+                //         document.body.removeChild(popup);
+                //     }
+                // }, { once: true });
+            }
+            // pass through scroll event:
+            el.addEventListener('scroll', e => {
+                e.stopPropagation();
+                e.preventDefault();
+            });
+            city.element3D = el;
+            city.element3D.style.opacity = '0'; // hide by default
+            return el;
+        })
+        .htmlElementVisibilityModifier((el, isVisible) => {
+            el.style.opacity = isVisible ? 1 : 0;
+        });
+    Promise.all([
+      new TextureLoader().loadAsync('https://cdn.jsdelivr.net/npm/three-globe/example/img/earth-day.jpg'),
+      new TextureLoader().loadAsync('https://cdn.jsdelivr.net/npm/three-globe/example/img/earth-night.jpg')
+    ]).then(([dayTexture, nightTexture]) => {
+      const material = new ShaderMaterial({
+        uniforms: {
+          dayTexture: { value: dayTexture },
+          nightTexture: { value: nightTexture },
+          sunPosition: { value: new Vector2() },
+          globeRotation: { value: new Vector2() }
+        },
+        vertexShader: dayNightShader.vertexShader,
+        fragmentShader: dayNightShader.fragmentShader
+      });
+
+      world.globeMaterial(material)
+        //.globeTileEngineUrl((x, y, l) => `https://tile.openstreetmap.org/${l}/${x}/${y}.png`)
+        .backgroundImageUrl('https://cdn.jsdelivr.net/npm/three-globe/example/img/night-sky.png')
+        // Update globe rotation on shader
+        .onZoom(({ lng, lat }) => material.uniforms.globeRotation.value.set(lng, lat));
+
+      requestAnimationFrame(() =>
+        (function animate() {
+          // animate time of day
+          //dt += VELOCITY * 60 * 1000;
+          const selectedUnixMinute = parseInt(timeRange.value);
+          const selectedTime = unixMinutesToDate(selectedUnixMinute);
+          //timeEl.textContent = new Date(selectedTime).toLocaleString();
+          material.uniforms.sunPosition.value.set(...sunPosAt(selectedTime));
+          requestAnimationFrame(animate);
+        })()
+      );
+    });
+
+    // 3d view toggle
+    const threeDViewToggle = document.getElementById('3dToggle');
+    threeDViewToggle.addEventListener('change', () => {
+        if (threeDViewToggle.checked) {
+            document.getElementById('map').style.display = 'none';
+            document.getElementById('globeViz').style.display = 'block';
+        } else {
+            document.getElementById('map').style.display = 'block';
+            document.getElementById('globeViz').style.display = 'none';
+        }
+    });
+    // 3d on by default
+    threeDViewToggle.checked = true;
+
+    // toggle 3d view on load
+    // emit change event to trigger the listener
+    threeDViewToggle.dispatchEvent(new Event('change'));
+
+  </script>
 </html>
