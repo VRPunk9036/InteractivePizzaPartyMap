@@ -293,12 +293,16 @@
                 if (shownCities.includes(city)) {
                     city.marker.getElement().style.display = 'block';
                     if (city.element3D !== undefined) {
-                        city.element3D.style.display = 'block'; // show the 3D element
+                         //city.element3D.style.display = 'block'; // show the 3D element
+                        city.element3D.style.opacity = '1'; // show the 3D element
+                        city.element3D.dataset.city_shown = 'true'; // mark as shown
                     }
                 } else {
                     city.marker.getElement().style.display = 'none';
                     if (city.element3D !== undefined) {
-                        city.element3D.style.display = 'none'; // hide the 3D element
+                        // city.element3D.style.display = 'none'; // hide the 3D element
+                        //city.element3D.style.opacity = '0'; // hide the 3D element
+                        city.element3D.dataset.city_shown = 'false'; // mark as not shown
                     }
                 }
             });
@@ -511,6 +515,9 @@ console.warn('Using module script for globe.gl example');
             //el.style.color = d.color;
             el.style.width = '10px'; //`${d.size}px`;
             el.style.transition = 'opacity 250ms';
+            el.dataset.city = city.city;
+            el.dataset.country = city.country;
+            el.dataset.city_shown = 'false'; // custom attribute to track visibility
 
             el.style['pointer-events'] = 'auto';
             el.style.cursor = 'pointer';
@@ -562,7 +569,7 @@ console.warn('Using module script for globe.gl example');
             return el;
         })
         .htmlElementVisibilityModifier((el, isVisible) => {
-            el.style.opacity = isVisible ? 1 : 0;
+            el.style.opacity = (isVisible && (el.dataset.city_shown === 'true')) ? 1 : 0;
         });
     Promise.all([
       new TextureLoader().loadAsync('https://cdn.jsdelivr.net/npm/three-globe/example/img/earth-day.jpg'),
